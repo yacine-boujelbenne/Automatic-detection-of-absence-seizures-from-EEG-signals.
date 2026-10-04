@@ -1,0 +1,31 @@
+# Environnements
+venv/
+.venv/
+env/
+.runtime/
+
+# Données binaires : sources et exports exclus de l'historique Git
+data/
+CRISES ABSENCES.zip
+artifacts/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Fichiers de verrouillage Excel
+~$*.xlsx
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+.opencode/node_modules/

@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p data)",
+      "Bash(unzip -o \"CRISES ABSENCES.zip\" -d data/)"
+    ]
+  }
+}

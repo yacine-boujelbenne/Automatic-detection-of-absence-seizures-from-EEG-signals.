@@ -1,0 +1,21 @@
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+# .claude/ est du code de reference verifie (76 tests) : il n'est pas reformate
+# automatiquement, sinon la suite de reference pourrait diverger.
+extend-exclude = ["venv", ".runtime", "data", "artifacts", ".ipynb_checkpoints", ".claude"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "NPY"]
+ignore = [
+    "E501",   # line length is handled by the formatter
+    "B008",   # function call in default argument is idiomatic for sklearn
+    "NPY002", # legacy np.random is fine in teaching material
+]
+
+[tool.ruff.lint.per-file-ignores]
+"notebooks/*" = ["E402", "F811", "B018"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", ".claude/skills/eeg-pipeline/reference"]
+addopts = "-q"
