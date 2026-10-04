@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0d716f">
+  <title>NeuroTrace — Analyse EEG</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="/" aria-label="NeuroTrace, accueil"><span class="brand-mark"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M3 17h6l3-9 5 17 4-13 3 5h5"/></svg></span><span>NeuroTrace<small>EXPLORATION EEG</small></span></a>
+    <div class="workspace-tag">ESPACE D’ANALYSE</div>
+    <nav aria-label="Navigation principale">
+      <button class="nav-item active" id="new-analysis"><span class="nav-icon">＋</span> Nouvelle analyse</button>
+      <button class="nav-item" id="go-results" disabled><span class="nav-icon">⌁</span> Résultats du tracé</button>
+      <button class="nav-item" id="open-method"><span class="nav-icon">◈</span> Modèle &amp; méthode</button>
+    </nav>
+    <div class="sidebar-note"><span class="small-wave">⌁</span><strong>Du signal à la détection.</strong><p>Explorez un enregistrement et retrouvez les épisodes signalés dans leur contexte.</p></div>
+    <div class="local-status"><span class="status-dot" id="status-dot"></span><div id="connection-status">Connexion au modèle…<small>Traitement sur cet ordinateur</small></div></div>
+    <div class="sidebar-foot">Mini-projet · Data Mining<span>Détection des crises d’absence</span></div>
+  </aside>
+  <div class="page">
+    <header class="topbar"><div>Exploration EEG <span>/</span> <strong>Nouvelle analyse</strong></div><span class="research-pill">PROTOTYPE PÉDAGOGIQUE</span></header>
+    <main>
+      <section class="page-heading"><div class="eyebrow">ANALYSE D’UN ENREGISTREMENT</div><h1>Un regard sur votre signal.</h1><p>Déposez un tracé EEG pour repérer les périodes suspectes et explorer chaque détection.</p></section>
+      <section class="upload-layout" aria-label="Importer un enregistrement">
+        <div class="card upload-card">
+          <div class="card-heading"><h2>Importer un tracé</h2><span class="step-badge">01</span></div>
+          <label class="drop-zone" id="drop-zone" for="file-input">
+            <span class="upload-symbol"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 22V5m-6 6 6-6 6 6M6 20v7h20v-7"/></svg></span>
+            <strong id="drop-title">Glissez votre enregistrement ici</strong><span id="drop-subtitle">ou <u>parcourez vos fichiers</u></span>
+            <span class="file-types">MAT · NPZ · CSV <span>jusqu’à 128 Mio</span></span>
+          </label>
+          <input type="file" id="file-input" accept=".mat,.npz,.csv" class="visually-hidden">
+          <div class="selected-file" id="selected-file" hidden><div><strong id="filename"></strong><span id="file-size"></span></div><button id="remove-file" class="icon-button" aria-label="Retirer le fichier">×</button></div>
+          <div class="upload-actions"><button class="primary-button" id="analyze-button" disabled>Analyser l’enregistrement <span>↗</span></button><button class="text-button" id="demo-button" disabled>Essayer un tracé du test <span>→</span></button></div>
+          <div class="progress-status" id="progress-status" role="status" hidden><span class="spinner"></span><span>Lecture du signal et analyse des fenêtres en cours…</span></div>
+          <div class="error-message" id="error-message" role="alert" hidden></div>
+          <p class="privacy-note"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m10 2 6 3v5c0 4-6 7-6 7s-6-3-6-7V5zM7 10l2 2 4-4"/></svg>Traitement local. Les fichiers déposés ne sont pas envoyés à un service externe.</p>
+        </div>
+        <aside class="card guide-card"><div class="card-heading"><h2>Avant de commencer</h2><span class="outline-symbol">i</span></div><p>Le même protocole que celui utilisé pour entraîner le modèle.</p><div class="guide-line"><span>01</span><div><strong>Un canal de référence</strong><p>Le canal <b>EEGF7</b>, dans l’échelle d’amplitude des données du projet.</p></div></div><div class="guide-line"><span>02</span><div><strong>Un temps vérifié</strong><p>La fréquence est mesurée sur les temps du fichier et doit correspondre aux <b>256 Hz</b> de l’apprentissage.</p></div></div><div class="guide-line"><span>03</span><div><strong>Des épisodes à explorer</strong><p>Fenêtres de 2 secondes, recouvrement de 50 %, puis regroupement des détections.</p></div></div><button class="format-link" id="open-formats">Consulter les formats acceptés <span>↗</span></button></aside>
+      </section>
+      <section class="empty-analysis" id="empty-analysis"><span class="empty-icon">⌁</span><h2>Votre analyse apparaîtra ici</h2><p>Un aperçu du tracé, les périodes détectées et le détail de chaque épisode.</p><div class="empty-lines" aria-hidden="true"><span></span><span></span><span></span></div></section>
+      <section id="results" hidden aria-label="Résultats de l’analyse">
+        <div class="results-heading"><div><div class="eyebrow">RÉSULTATS DU TRACÉ</div><h2 id="result-title">Analyse terminée</h2><p id="result-subtitle"></p></div><div class="export-actions"><button class="secondary-button" id="download-csv">Exporter les épisodes ↓</button><button class="secondary-button" id="download-json">Rapport JSON ↓</button></div></div>
+        <div class="kpi-grid"><article class="kpi"><span>Durée de l’enregistrement</span><strong id="kpi-duration">—</strong><small id="kpi-windows"></small></article><article class="kpi"><span>Canal &amp; fréquence</span><strong id="kpi-channel">—</strong><small>Fréquence mesurée sur les temps</small></article><article class="kpi kpi-accent"><span>Épisodes signalés</span><strong id="kpi-events">—</strong><small>Détections à vérifier sur le tracé</small></article><article class="kpi"><span>Temps signalé cumulé</span><strong id="kpi-total">—</strong><small id="kpi-fraction"></small></article></div>
+        <div class="result-notice" id="result-notice"></div>
+        <article class="card signal-card"><div class="card-heading"><div><h2>Explorer le signal</h2><p id="chart-subtitle">EEGF7 · amplitude en unité du fichier source</p></div><div class="legend"><span><i class="line-swatch"></i> Signal EEG</span><span><i class="event-swatch"></i> Épisode signalé</span></div></div><div class="overview-wrap"><canvas id="overview-chart" aria-label="Vue d’ensemble du signal EEG et des épisodes signalés" role="img"></canvas><p>Cliquez sur la vue d’ensemble pour déplacer le zoom.</p></div><div class="chart-toolbar"><div><span class="zoom-label">ZOOM</span><strong id="zoom-range"></strong></div><label>Fenêtre <select id="zoom-width"><option value="10">10 secondes</option><option value="30" selected>30 secondes</option><option value="60">60 secondes</option><option value="120">120 secondes</option></select></label></div><div class="detail-wrap"><canvas id="detail-chart" aria-label="Zoom du signal EEG" role="img"></canvas></div><label class="slider-label" for="zoom-start">Position du zoom <span id="zoom-position"></span></label><input id="zoom-start" type="range" min="0" max="1" value="0" step="0.25"><p id="chart-error" class="chart-error" role="alert" hidden></p></article>
+        <article class="card events-card"><div class="card-heading"><div><h2>Détail des épisodes</h2><p>Les horaires sont relatifs au début de l’enregistrement. Sélectionnez une ligne pour explorer le signal.</p></div><span class="count-pill" id="event-count"></span></div><div id="no-events" class="no-events" hidden>Aucun épisode signalé par ce modèle sur les fenêtres analysées. Cela ne permet pas d’exclure une crise.</div><div class="table-scroll" id="events-table-wrap"><table><thead><tr><th>Épisode</th><th>Début</th><th>Fin</th><th>Durée</th><th>Score moyen du modèle</th><th>Explorer</th></tr></thead><tbody id="events-body"></tbody></table></div><p class="table-footnote">Le score résume les fenêtres positives de l’épisode. Il ne s’agit pas d’une probabilité clinique calibrée.</p></article>
+        <div class="model-strip"><div><span class="model-dot"></span><strong id="model-label"></strong><span>12 caractéristiques · paramètres du notebook</span></div><button class="text-button" id="result-method">Voir la méthode ↗</button></div>
+      </section>
+      <footer class="main-footer"><span>NeuroTrace <span class="footer-separator">/</span> Projet EEG</span><p>Prototype pédagogique. Les détections nécessitent une vérification experte et ne constituent pas un diagnostic.</p></footer>
+    </main>
+  </div>
+  <dialog id="info-dialog"><div class="dialog-heading"><h2 id="dialog-title"></h2><button class="icon-button" id="close-dialog" aria-label="Fermer">×</button></div><div id="dialog-content"></div></dialog>
+</body>
+</html>
