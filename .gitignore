@@ -29,3 +29,13 @@ Thumbs.db
 .vscode/
 .idea/
 .opencode/node_modules/
+
+# Modèle exporté pour l'application (régénéré par app/prepare_model.py)
+app/model/
+
+# Outillage des assistants, conservé localement hors du dépôt
+.claude/
+.opencode/
+AGENTS.md
+CLAUDE.md
+opencode.json

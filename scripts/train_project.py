@@ -27,10 +27,14 @@ def main():
     print("Fenêtres", len(frame), "positives", int(frame.Class.sum()), flush=True)
     print("Test", sorted(frame.iloc[test].record_id.unique()), len(test), flush=True)
     result = eeg.run_training(frame, train, test, folds, out)
-    temporal = eeg.temporal_analysis(frame, events, result, out)
     print("Choix en validation interne :", result["best"])
-    print(result["results"].to_string(index=False))
+    print(result["cv_summary"].head(12).to_string(index=False))
+    temporal = eeg.temporal_analysis(frame, events, result, out)
+    print("Post-traitement :", temporal["params"])
+    print(temporal["comparison"].to_string(index=False))
     print(temporal["events"].to_string(index=False))
+    loro = eeg.leave_one_record_out(frame, events, eeg.loro_shortlist(result["best"]), out)
+    print(eeg.loro_summary(loro).to_string(index=False))
 
 
 if __name__ == "__main__":

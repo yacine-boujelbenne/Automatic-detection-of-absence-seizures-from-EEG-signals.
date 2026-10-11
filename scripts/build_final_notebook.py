@@ -21,27 +21,32 @@ def build():
 
     md("""
     # Détection automatique des crises d'absence à partir de l'EEG
-    **Mini-projet de Data Mining — notebook final exécuté — 4 octobre 2026**
+    **Mini-projet de data mining — notebook final exécuté**
 
-    **Objectif.** Comparer un arbre de décision, une forêt aléatoire, un KNN et un
-    SVM, puis reconstruire les périodes de crises. Nous comparons les données
-    initiales, le sous-échantillonnage des fenêtres normales, le suréchantillonnage
-    des crises par duplication et SMOTE dans l'espace des caractéristiques.
+    Nous classons des fenêtres EEG de 2 s en « crise » ou « hors crise », comparons
+    quatre classifieurs (arbre de décision, forêt aléatoire, KNN, SVM) et cinq façons
+    de traiter le déséquilibre, puis reconstruisons les épisodes de crise.
 
-    Le classeur utilisé est **Annotations MAJ.xlsx**. Les horaires sont convertis
-    par rapport à **DebutTrace**, conformément au message de l'enseignant. Les
-    signaux restent réels : aucun EEG ou horaire de crise n'est inventé.
+    Deux jeux de caractéristiques sont évalués côte à côte : les **12 caractéristiques
+    de l'énoncé**, et un jeu **enrichi** motivé par l'analyse exploratoire (section 6).
+    La sélection se fait uniquement en validation interne ; le test réservé n'est lu
+    qu'une fois, à la fin.
 
-    **Lecture pour la présentation :** données et annotations (1–4), fenêtres et
-    caractéristiques (5–6), modèles et comparaison (7–9), détection et erreurs
-    (10–11), bilan des améliorations et conclusion (12).
+    | Sections | Contenu |
+    |---|---|
+    | 1–4 | données, contrôles, visualisation, annotations (Q1–Q4) |
+    | 5–6 | fenêtres, étiquettes, caractéristiques (Q5–Q11) |
+    | 7–9 | séparation, entraînement, évaluation, comparaison (Q12–Q13) |
+    | 10–11 | reconstruction des épisodes et analyse des erreurs (Q14) |
+    | 12 | améliorations mesurées et validation « un enregistrement exclu » |
     """)
+
     md("""
     ## 1. Chargement des données
-    Le notebook utilise l'interpréteur du projet et les modules `src/` fournis avec
-    lui. Il s'exécute depuis la racine ou depuis `notebooks/`. Les entraînements sont
-    conservés avec une empreinte des données, du code, des partitions et des versions.
-    Mettre `RETRAIN = True` force leur recalcul ; le cache vérifié accélère la présentation.
+    Les fonctions de calcul sont dans `src/eeg_project.py` ; leur code est affiché
+    dans le notebook là où il sert. Les entraînements sont mis en cache avec une
+    empreinte du code, des données, des partitions et des versions : `RETRAIN = True`
+    force leur recalcul.
     """)
     code("""
     import sys
@@ -49,7 +54,6 @@ def build():
 
     import numpy as np
     import pandas as pd
-    import seaborn as sns
     from IPython.display import Markdown, display
 
     ROOT = next(path for path in [Path.cwd(), *Path.cwd().parents]
@@ -64,11 +68,11 @@ def build():
     FIGURES = OUT / 'figures'
     OUT.mkdir(parents=True, exist_ok=True)
     RETRAIN = False
-    sns.set_theme(style='whitegrid', context='notebook', font_scale=1.05)
-    pd.set_option('display.max_columns', 18)
-    pd.set_option('display.max_rows', 30)
+    presentation.apply_style()
+    pd.set_option('display.max_columns', 20)
+    pd.set_option('display.max_rows', 40)
+    pd.set_option('display.width', 160)
     pd.set_option('display.float_format', lambda value: f'{value:.3f}')
-    display(Markdown(f'**Projet :** `{ROOT.name}` — **Graine :** {eeg.SEED} — **Canal fixé :** {eeg.CHANNEL}'))
     """)
     code("""
     cohort, events, audit, all_events, unannotated = eeg.load_annotations(ROOT)
@@ -80,27 +84,24 @@ def build():
         'count_mismatch': 'Écart de comptage', 'age': 'Âge', 'sex': 'Sexe', 'duration_s': 'Durée du tracé (s)'
     }))
     display(Markdown(f'**Cohorte retenue : {len(cohort)} enregistrements, {len(events)} crises.** '
-                     f'Exports sans annotation mise à jour, exclus : {", ".join(unannotated)}.'))
+                     f'Exports sans ligne dans le classeur mis à jour, non utilisés : {", ".join(unannotated)}.'))
     """)
     md("""
-    Les deux doublons conflictuels `230406B-A` et `230515B-G` sont exclus. Tout
-    `210504B-C` est exclu parce qu'une crise de 21 608 s dépasse la durée du tracé :
-    la tronquer ferait presque tout classer en crise. Les onze paires de
-    `210914B-A` sont conservées malgré `NombreCE = 6`. Les noms `DebutCE5` et
-    `DebtCE11` sont reconnus par leur numéro. L'absence d'annotation ne signifie
-    pas absence de crise. Ces décisions sont fixées avant l'entraînement.
+    Trois exclusions, décidées avant tout apprentissage :
+    `230406B-A` et `230515B-G` apparaissent deux fois avec des annotations
+    contradictoires ; `210504B-C` contient une crise à 21 608 s dans un tracé de
+    3 121 s. `210914B-A` déclare `NombreCE = 6` mais décrit 11 paires : les 11 sont
+    conservées. Les colonnes mal orthographiées `DebutCE5` et `DebtCE11` sont reconnues
+    par leur numéro.
     """)
+
     md("""
     ## 2. Exploration
-    **Q1.** Les fichiers MCOS ne sont pas directement lus comme des tableaux EEG
-    par `scipy.io` ou `h5py`. Les exports déjà présents sont contrôlés contre les
-    **cellules numériques structurées** du fichier MATLAB original : tous les
-    blocs, leurs dimensions, les noms ordonnés et les temps doivent correspondre.
-    Les empreintes SHA-256 invalident le contrôle si un fichier change.
-
-    La propriété temporelle MATLAB `millis` identifie les millisecondes. La
-    fréquence est dérivée du nombre réel d'échantillons par bloc et de l'écart
-    entre les lignes temporelles, puis vérifiée sur le vecteur `Time` développé.
+    **Q1.** Les `.mat` contiennent des objets MATLAB `timetable` (MCOS) que `scipy.io`
+    et `h5py` ne lisent pas. Les exports NPZ sont comparés **valeur par valeur** aux
+    cellules numériques des fichiers d'origine : échantillons, noms des canaux, temps.
+    La fréquence est mesurée à partir du nombre d'échantillons par bloc et de l'écart
+    entre les lignes temporelles, puis vérifiée sur l'axe développé.
     """)
     code("""
     validation = validate_exports(ROOT, cohort.record_id, OUT)
@@ -120,25 +121,20 @@ def build():
     info = validation.set_index('record_id').loc[DEMO]
     display(pd.Series({
         'Enregistrement': DEMO, 'Lignes': len(signal_demo), 'Variables (Time + canaux)': int(info.n_channels) + 1,
-        'Type EEG exporté': 'float32, calculs en float64', 'Fréquence mesurée (Hz)': fs_demo,
-        'Durée couverte (s)': len(signal_demo) / fs_demo,
-        'Valeurs manquantes / non finies dans le canal': int((~np.isfinite(signal_demo)).sum())
+        'Fréquence mesurée (Hz)': fs_demo, 'Durée couverte (s)': len(signal_demo) / fs_demo,
+        'Valeurs manquantes ou non finies': int((~np.isfinite(signal_demo)).sum())
     }).to_frame('Q1'))
-    display(pd.DataFrame({'Time (s)': t_demo[:8], eeg.CHANNEL: signal_demo[:8]}))
+    display(pd.DataFrame({'Time (s)': t_demo[:6], eeg.CHANNEL: signal_demo[:6]}))
     """)
     md("""
-    Le canal commun **EEGF7** est fixé avant toute comparaison. Aucun canal n'est
-    choisi selon les performances du test. Les amplitudes sont exprimées dans
-    l'unité du fichier : une unité physique non fournie n'est pas inventée.
-    La durée couverte est `N / fs`, tandis que le dernier temps d'échantillon est
-    `(N − 1) / fs`. Le contrôle de source est technique, sans validation clinique.
+    Le canal **F7** (`EEGF7`), présent dans tous les tracés, est fixé avant toute
+    comparaison : les absences sont des crises généralisées, visibles sur l'ensemble
+    du scalp. Les amplitudes sont dans l'unité du fichier, qui n'est pas documentée.
     """)
+
     md("""
     ## 3. Visualisations
-    **Q2.** Le signal complet et un zoom présentent les périodes annotées.
-    Les titres identifient le tracé et le canal ; les axes indiquent le temps et
-    l'unité disponible. L'affichage du tracé complet peut être réduit en points,
-    mais les calculs utilisent tous les échantillons.
+    **Q2.** Le tracé complet, puis un zoom de 10 s autour de la crise annotée.
     """)
     code("""
     presentation.signal_plot(t_demo, signal_demo, demo_intervals, DEMO, FIGURES, name='signal_annote')
@@ -147,52 +143,50 @@ def build():
                              name='signal_zoom', bounds=(a - 10, b + 10))
     """)
     md("""
-    **Observation visuelle.** Le zoom permet de comparer l'amplitude et la
-    régularité du tracé pendant l'intervalle annoté et autour de lui. Une décharge
-    rythmique ou une variation d'amplitude constitue une observation locale ;
-    elle ne démontre pas à elle seule que les quatre modèles généraliseront.
-    La FFT et les distributions de caractéristiques complètent cette lecture.
+    Pendant l'intervalle annoté, le tracé montre une activité rythmique ample et
+    régulière, nettement différente de l'activité de fond. Le tracé complet montre aussi
+    une **dérive lente et un décalage continu** : le signal n'est pas centré sur zéro.
+    Ce point aura des conséquences en section 6.
     """)
+
     md("""
     ## 4. Traitement des annotations
-    **Q3–Q4.** Les valeurs sont des **horaires Excel**, et non des durées ou des
-    fractions de la durée de l'enregistrement. La précision de l'enseignant
-    fournit l'origine temporelle désormais disponible.
+    **Q3–Q4.** Les débuts et fins sont des **horaires Excel** (fractions de jour).
+    Ils sont convertis en secondes depuis le début du tracé :
 
-    `début_s = (DebCE − DebutTrace) × 86400` ;
-    `fin_s = (FinCE − DebutTrace) × 86400` ;
-    `durée_s = fin_s − début_s`.
+    `début_s = (DebCE − DebutTrace) × 86 400`, `fin_s = (FinCE − DebutTrace) × 86 400`.
 
-    Pour `190304A-E` : 10:13:35 → début du tracé ; 10:35:06 → début de crise ;
-    10:35:13 → fin de crise. La crise est **[1291 s, 1298 s]**, soit **7 s**.
+    Pour `190304A-E` : tracé commencé à 10:13:35, crise de 10:35:06 à 10:35:13,
+    soit **[1 291 s ; 1 298 s]** et une durée de **7 s**.
     """)
     code("""
     display(events[['record_id', 'event', 'start_s', 'end_s', 'duration_s']]
             .rename(columns={'record_id': 'Enregistrement', 'event': 'Crise',
                              'start_s': 'Début (s)', 'end_s': 'Fin (s)', 'duration_s': 'Durée (s)'}))
-    display(events.groupby('record_id').agg(Nombre=('event', 'count'),
-                                            Duree_totale_s=('duration_s', 'sum')))
     gaps = presentation.duration_plots(events, FIGURES)
     display(pd.Series({
         'Nombre de crises': len(events), 'Durée moyenne (s)': events.duration_s.mean(),
         'Durée médiane (s)': events.duration_s.median(), 'Durée minimale (s)': events.duration_s.min(),
         'Durée maximale (s)': events.duration_s.max(),
-        'Intervalle libre moyen fin → début suivant (s)': gaps.mean()
+        'Intervalle moyen entre deux crises (s)': gaps.mean()
     }).to_frame('Q4'))
-    display(Markdown(f'**Les durées ne sont pas identiques :** de {events.duration_s.min():.0f} '
-                     f'à {events.duration_s.max():.0f} s, avec une médiane de {events.duration_s.median():.0f} s. '
-                     'Les intervalles entre crises sont calculés dans un même enregistrement.'))
     """)
     md("""
-    ## 5. Segmentation
-    **Q5–Q7.** Chaque échantillon reçoit la classe 0 (hors crise) ou 1 (crise).
-    Le PDF, p. 4, imprime **[début, fin]**. Nous suivons cette convention fermée,
-    conformément à la demande de fidélité au PDF ; la référence locale utilise
-    `(début, fin]`, soit un échantillon de différence par début aligné.
+    Les durées ne sont pas identiques : de 3 à 49 s, avec une médiane de 11 s. Une
+    crise de 3 s ne couvre qu'une ou deux fenêtres de 2 s, alors qu'une crise de 49 s
+    en couvre une cinquantaine. La reconstruction des épisodes (section 10) doit en tenir compte.
+    """)
 
-    Une fenêtre dure **2 s** et recouvre la précédente à **50 %**. Sa classe vaut
-    1 lorsque **au moins 50 %** de ses échantillons sont en crise. Les fenêtres
-    incomplètes en fin de tracé sont omises ; les tracés ne sont jamais concaténés.
+    md("""
+    ## 5. Segmentation
+    **Q5–Q7.** Chaque échantillon reçoit la classe 1 s'il tombe dans un intervalle
+    annoté **[début, fin]** (bornes incluses, comme dans l'énoncé), 0 sinon. Les
+    fenêtres durent **2 s** (512 échantillons) avec un recouvrement de **50 %** (pas
+    de 256). Une fenêtre est de classe 1 si **au moins 50 %** de ses échantillons sont
+    en crise. Les tracés ne sont jamais concaténés.
+    """)
+    code("""
+    presentation.show_source(eeg.sample_mask, eeg.segment_signal)
     """)
     code("""
     demo_windows, demo_starts, demo_labels, demo_coverage, demo_mask = eeg.segment_signal(
@@ -200,45 +194,40 @@ def build():
     display(pd.DataFrame({'Classe': ['Hors crise', 'Crise'],
                           'Échantillons': [int((~demo_mask).sum()), int(demo_mask.sum())],
                           'Fenêtres': [int((demo_labels == 0).sum()), int((demo_labels == 1).sum())]}))
-    display(pd.DataFrame({'Début fenêtre (s)': t_demo[demo_starts], 'Couverture de crise': demo_coverage,
+    display(pd.DataFrame({'Début fenêtre (s)': t_demo[demo_starts], 'Part de crise': demo_coverage,
                           'Class': demo_labels}).loc[demo_coverage > 0])
-    display(Markdown(f'**Fenêtre :** {demo_windows.shape[1]} échantillons ; '
-                     f'**pas :** {demo_starts[1] - demo_starts[0]} échantillons.'))
     """)
     md("""
+    La crise de 7 s produit 8 fenêtres positives. La fenêtre qui commence à 1 297 s
+    n'a que 50,2 % de ses échantillons en crise : elle est positive de justesse.
+    """)
+
+    md("""
     ## 6. Extraction des caractéristiques
-    **Q8–Q11.** Une ligne est une fenêtre et les prédicteurs sont exactement les
-    huit statistiques temporelles et les quatre puissances demandées.
-
-    | Temporelles | Définition |
-    |---|---|
-    | Moyenne, écart-type, variance | Statistiques de population (`ddof = 0`) |
-    | Minimum, maximum, amplitude | Amplitude = maximum − minimum |
-    | RMS, énergie | RMS = √moyenne(x²) ; énergie = Σx² |
-
-    La FFT est unilatérale, avec normalisation `|rFFT|²/N²` et doublement hors
-    composantes DC et Nyquist. La somme de ses puissances est la moyenne du carré
-    du signal. Les bandes sont Delta [0,5;4[, Theta [4;8[, Alpha [8;13[ et
-    Beta [13;30[ Hz ; leurs frontières ne sont pas comptées deux fois.
+    **Q8–Q11.** Une ligne par fenêtre. Les 12 prédicteurs demandés : moyenne,
+    écart-type, variance, minimum, maximum, amplitude (max − min), RMS, énergie (Σx²),
+    et les puissances FFT unilatérales en Delta [0,5 ; 4[, Theta [4 ; 8[, Alpha [8 ; 13[
+    et Beta [13 ; 30[ Hz.
+    """)
+    code("""
+    presentation.show_source(eeg.one_sided_spectrum, eeg.extract_features)
     """)
     code("""
     frame, counts = eeg.build_features(ROOT, cohort, events, validation)
     frame.to_csv(OUT / 'features.csv', index=False)
     counts.to_csv(OUT / 'class_counts.csv', index=False)
-    assert frame[eeg.FEATURES].shape[1] == 12
-    assert np.isfinite(frame[eeg.FEATURES].to_numpy()).all()
-    display(frame[['record_id', 'start_s', *eeg.FEATURES, 'Class']].head(6))
+    assert np.isfinite(frame[eeg.FEATURES + eeg.IMPROVED_FEATURES].to_numpy()).all()
+    display(frame[['record_id', 'start_s', *eeg.FEATURES, 'Class']].head(5))
     display(counts.rename(columns={'record_id': 'Enregistrement', 'samples': 'Échantillons',
                                    'positive_samples': 'Échantillons crise', 'windows': 'Fenêtres',
                                    'positive_windows': 'Fenêtres crise', 'fs_hz': 'Fréquence (Hz)',
                                    'duration_s': 'Durée (s)', 'channel': 'Canal',
                                    'missing_values': 'Valeurs manquantes'}))
     display(Markdown(
-        f'**Q6/Q8 — Cohorte :** {counts.samples.sum():,} échantillons ; '
-        f'{100 * counts.positive_samples.sum() / counts.samples.sum():.2f} % en crise. '
-        f'**Fenêtres :** {len(frame):,}, dont {int(frame.Class.sum()):,} crises '
-        f'({100 * frame.Class.mean():.2f} %) et {int((frame.Class == 0).sum()):,} hors crise. '
-        'Ces deux pourcentages portent sur des unités différentes ; le déséquilibre est important.'
+        f'**Cohorte :** {counts.samples.sum():,} échantillons, dont '
+        f'{100 * counts.positive_samples.sum() / counts.samples.sum():.2f} % en crise ; '
+        f'{len(frame):,} fenêtres, dont {int(frame.Class.sum())} positives ({100 * frame.Class.mean():.2f} %). '
+        'Un classifieur qui répond toujours « hors crise » aurait donc environ 96 % d\\'accuracy.'
     ))
     presentation.imbalance_plot(counts, FIGURES)
     """)
@@ -249,48 +238,74 @@ def build():
             .mean().rename_axis('Classe').rename(index={0: 'Hors crise', 1: 'Crise'}))
     """)
     md("""
-    **Q9.** Le spectre et les quatre puissances ci-dessus sont calculés sur le
-    canal réel. Leur comparaison indique dans quelles bandes l'énergie varie
-    pour cet enregistrement. Une bande pédagogique, notamment Delta 0,5–4 Hz,
-    ne doit pas être confondue avec un diagnostic clinique fondé uniquement sur
-    une fréquence ou avec un résultat commun à tous les tracés.
+    **Q9.** Sur ce tracé, la puissance augmente dans toutes les bandes pendant la crise,
+    surtout en Delta (environ ×8) et en Theta : c'est la décharge de pointes-ondes
+    autour de 3 Hz, typique des absences.
     """)
     code("""
     feature_summary, correlation = presentation.feature_plots(frame, FIGURES)
     display(feature_summary.T.rename(columns={0: 'Hors crise', 1: 'Crise'}))
     correlation.to_csv(OUT / 'feature_correlations.csv')
-    feature_summary.to_csv(OUT / 'features_by_class.csv')
     upper = correlation.where(np.triu(np.ones(correlation.shape), k=1).astype(bool))
     pairs = upper.stack().rename('Corrélation').reset_index()
     pairs.columns = ['Variable 1', 'Variable 2', 'Corrélation']
     display(pairs.loc[pairs['Corrélation'].abs() >= 0.85].sort_values('Corrélation', ascending=False))
-    pooled_std = np.sqrt((frame.loc[frame.Class == 0, eeg.FEATURES].var()
-                         + frame.loc[frame.Class == 1, eeg.FEATURES].var()) / 2)
-    effect = ((frame.loc[frame.Class == 1, eeg.FEATURES].mean()
-               - frame.loc[frame.Class == 0, eeg.FEATURES].mean()) / pooled_std.replace(0, np.nan)).abs()
-    display(effect.sort_values(ascending=False).rename('Écart standardisé absolu entre classes').to_frame())
-    display(Markdown('**Q11 — Réponses.** '
-        '1. Les paires fortement corrélées sont celles du tableau ci-dessus. '
-        '2. Variance et écart-type, ainsi que énergie et RMS, ont des relations déterministes : '
-        'il existe une redondance, même si la corrélation de Pearson ne vaut pas exactement 1. '
-        f'3. Selon cet écart descriptif, les caractéristiques les plus discriminantes sont '
-        f'**{", ".join(effect.sort_values(ascending=False).head(3).index)}**. '
-        'Cette EDA décrit la cohorte ; elle ne sert pas à sélectionner des variables à partir du test. '
-        'Les 12 prédicteurs sont conservés pour toutes les configurations.'))
+    effect = presentation.effect_sizes(frame, eeg.FEATURES).sort_values(ascending=False)
+    display(effect.rename('Écart standardisé |d| entre classes').to_frame())
     """)
     md("""
-    ## 7. Entraînement des modèles
-    **Q12.** Une séparation groupée empêche les fenêtres partageant des
-    échantillons de se retrouver dans les deux ensembles. Des partitions fixées
-    avec la graine 42 sont comparées **uniquement selon les effectifs et proportions**
-    pour approcher 80/20 et une stratification des classes. Les groupes indivisibles
-    rendent le ratio exact impossible ; les proportions réalisées sont publiées.
+    **Q10–Q11.** Variance et écart-type, énergie et RMS sont liés par construction
+    (variance = écart-type², énergie = 512 × RMS²) : ils sont redondants, même si leur
+    corrélation de Pearson n'est pas exactement 1. Les caractéristiques qui séparent le
+    mieux les classes sont l'amplitude, le minimum et l'écart-type.
 
-    Trois plis de validation stratifiée groupée, **dans l'apprentissage seulement**,
-    servent à sélectionner le F1 moyen. Le rappel et la précision départagent les
-    égalités. Les hyperparamètres sont fixés à l'avance : arbre (profondeur 8,
-    feuille minimale 5), forêt (200 arbres, feuille minimale 2), KNN (5 voisins,
-    poids de distance), SVM RBF (`C = 1`). Ils ne sont pas ajustés sur le test.
+    Deux résultats sont toutefois inquiétants :
+
+    1. **La puissance Delta ne sépare presque pas les classes** sur la cohorte
+       (|d| ≈ 0), alors qu'elle est multipliée par 8 pendant la crise du tracé de
+       démonstration. Ses valeurs ont une queue extrêmement lourde : l'écart-type
+       dépasse 20 fois la moyenne, à cause d'artefacts.
+    2. **Le minimum et la moyenne figurent parmi les « meilleures » caractéristiques**,
+       alors qu'une décharge à 3 Hz ne déplace pas la moyenne d'une fenêtre de 2 s.
+    """)
+    code("""
+    presentation.offset_plot(frame, FIGURES)
+    """)
+    md("""
+    Le signal brut contient un **décalage continu propre à chaque enregistrement**,
+    de plusieurs centaines d'unités. La moyenne, le minimum et le maximum indiquent
+    donc surtout *de quel tracé* vient une fenêtre. Comme les tracés ont des
+    proportions de crises très différentes (de 0,5 % à 15,5 % des fenêtres), un modèle
+    peut apprendre l'identité du tracé au lieu de la crise, ce qui ne se généralise pas.
+
+    D'où un **second jeu de caractéristiques** :
+
+    - filtrage passe-haut à 0,5 Hz (Butterworth d'ordre 4, sans déphasage), qui retire le décalage et la dérive ;
+    - logarithmes de l'écart-type, de l'amplitude, de la longueur de ligne et des quatre puissances, contre les queues lourdes ;
+    - puissances relatives, part de la bande 2,5–4,5 Hz des pointes-ondes, rapport Delta / (Alpha + Beta), asymétrie, kurtosis, fréquence dominante ;
+    - centrage-réduction par la médiane et l'IQR **de chaque enregistrement**, sans étiquette, puis bornage à ±10.
+
+    Les 12 caractéristiques de l'énoncé restent calculées et évaluées telles quelles.
+    """)
+    code("""
+    presentation.show_source(eeg.highpass, eeg.extract_improved_features, eeg.robust_normalize)
+    """)
+    code("""
+    base_effect, improved_effect = presentation.effect_comparison_plot(frame, FIGURES)
+    display(Markdown(
+        f'**Meilleure séparation :** {base_effect.max():.2f} avec les 12 caractéristiques, '
+        f'{improved_effect.max():.2f} avec le jeu enrichi. Puissance Delta : '
+        f'{base_effect["power_delta"]:.3f} en brut, {improved_effect["log_power_delta"]:.2f} en log normalisé.'
+    ))
+    """)
+
+    md("""
+    ## 7. Entraînement des modèles
+    **Q12.** Les fenêtres se recouvrent de 50 % et celles d'un même tracé se
+    ressemblent : une séparation fenêtre par fenêtre mettrait des quasi-doublons des
+    deux côtés. La séparation 80/20 se fait donc **par enregistrement**. Parmi 256
+    tirages groupés, on retient celui qui approche le mieux 80/20 et la proportion de
+    crises, **sans regarder aucun score**.
     """)
     code("""
     train_indices, test_indices, folds = eeg.choose_split(frame)
@@ -304,144 +319,172 @@ def build():
         for name, subset in [('Apprentissage', frame.iloc[train_indices]), ('Test réservé', frame.iloc[test_indices])]
     ])
     display(split_table)
-    display(pd.DataFrame({'Apprentissage': pd.Series(sorted(train_records)),
-                          'Test réservé': pd.Series(sorted(test_records))}).fillna(''))
-    split_table.to_csv(OUT / 'split_summary.csv', index=False)
+    display(Markdown(f'**Test réservé :** {", ".join(sorted(test_records))}.'))
     """)
     md("""
-    Chaque configuration est un pipeline **StandardScaler → rééchantillonnage
-    éventuel → modèle**. Normalisation et équilibrage sont réajustés uniquement
-    sur chaque pli d'apprentissage. L'égalité des effectifs concerne l'entraînement,
-    jamais le test. Les identifiants et horaires servent à regrouper et reconstruire
-    les fenêtres ; ils ne font pas partie des prédicteurs.
+    Chaque configuration est un pipeline **normalisation → rééchantillonnage éventuel →
+    modèle**, réajusté sur chaque pli : le rééchantillonnage ne touche jamais les
+    fenêtres évaluées. Hyperparamètres fixés à l'avance : arbre (profondeur 8, feuilles
+    d'au moins 5 fenêtres), forêt (200 arbres), KNN (5 voisins pondérés par la
+    distance), SVM RBF (C = 1).
 
-    SMOTE interpole des caractéristiques de crises réelles de l'apprentissage ;
-    ses lignes ne sont ni de nouveaux patients, ni des crises réellement annotées.
-    Les deux stratégies proposées sont ainsi comparées à une référence sans
-    équilibrage, avec la duplication comme contrôle de l'interpolation.
+    Stratégies : les quatre de l'énoncé (aucune, sous-échantillonnage, duplication,
+    SMOTE), plus la **pondération des classes** (`class_weight="balanced"`), qui ne
+    s'applique pas au KNN. 2 jeux × 19 couples = **38 configurations**.
+
+    **Règle de sélection, fixée avant le calcul :** la **précision moyenne (AP)**
+    moyenne sur trois plis groupés de l'apprentissage. L'AP résume toute la courbe
+    précision-rappel sans dépendre du seuil de 0,5, que rien ne justifie avec 4 % de
+    positifs. Une configuration est dite *ex aequo* si son AP est à moins d'un
+    écart-type de la meilleure.
+    """)
+    code("""
+    presentation.show_source(eeg.make_model)
     """)
     code("""
     experiment = eeg.run_training(frame, train_indices, test_indices, folds, OUT, force=RETRAIN)
-    cv_display = experiment['cv_summary'].copy()
-    cv_display['strategy'] = cv_display.strategy.map(eeg.STRATEGIES)
-    cv_display['model'] = cv_display.model.map(eeg.MODELS)
-    display(cv_display[['strategy', 'model', 'precision_mean', 'recall_mean', 'f1_mean', 'f1_std']]
-            .rename(columns={'strategy': 'Stratégie', 'model': 'Modèle', 'precision_mean': 'Précision CV',
-                             'recall_mean': 'Rappel CV', 'f1_mean': 'F1 moyen CV', 'f1_std': 'Écart-type F1 CV'}))
-    selected_strategy, selected_model = experiment['best'].split('__')
-    display(Markdown(f'**Choix fixé en validation interne : {eeg.MODELS[selected_model]} '
-                     f'avec {eeg.STRATEGIES[selected_strategy].lower()}.** '
-                     'Le classement du test ne change pas ce choix.'))
+    display(presentation.cv_table(experiment))
+    presentation.cv_ranking_plot(experiment, FIGURES)
+    best = experiment['best']
+    display(Markdown(f'**Configuration retenue en validation interne : {eeg.config_label(best)}.**'))
     """)
     md("""
+    Avec les 12 caractéristiques de l'énoncé, les configurations sont très proches et
+    leurs écarts-types sont du même ordre que leurs différences : choisir entre elles
+    revient presque à tirer au sort. Avec le jeu enrichi, la forêt aléatoire se détache
+    nettement, quelle que soit la stratégie d'équilibrage.
+    """)
+
+    md("""
     ## 8. Évaluation
-    **Q13.** Le test garde toutes ses fenêtres réelles et son déséquilibre naturel.
-    Les quatre métriques demandées et les matrices de confusion sont présentées
-    pour chaque configuration. La classe positive est toujours la crise.
+    **Q13.** Le test garde toutes ses fenêtres et son déséquilibre naturel. La classe
+    positive est la crise. Le seuil par défaut est utilisé ici (0,5 pour les
+    probabilités, 0 pour la marge du SVM).
     """)
     code("""
     y_test = frame.iloc[test_indices].Class.to_numpy()
     baseline = eeg.score_predictions(y_test, np.zeros(len(y_test), dtype=int))
-    display(pd.DataFrame([baseline], index=['Toujours hors crise'])
+    display(pd.DataFrame([baseline], index=['Toujours « hors crise »'])
             .rename(columns={'accuracy': 'Accuracy', 'precision': 'Précision', 'recall': 'Rappel', 'f1': 'F1'}))
     display(presentation.metrics_table(experiment, strategy='original'))
-    presentation.confusion_plots(experiment, FIGURES)
+    presentation.confusion_grid(experiment, FIGURES)
     """)
     md("""
-    **Pourquoi l'accuracy est trompeuse.** La baseline peut avoir une accuracy
-    élevée tout en manquant toutes les crises. Le **rappel** est essentiel pour
-    rendre ces omissions visibles ; la **précision** mesure la fiabilité des
-    fenêtres signalées. Un rappel parfait en prédisant « crise » partout ne
-    suffirait pas. Le **F1** sert ici de compromis pour sélectionner le modèle,
-    accompagné des deux métriques et du nombre de fausses alertes. Une précision
-    n'est pas un nombre d'alarmes par heure.
+    **Pourquoi l'accuracy est trompeuse.** La baseline atteint près de 96 %
+    d'accuracy sans détecter une seule crise. Le **rappel** compte les crises
+    manquées, la **précision** les fausses alertes, et le **F1** combine les deux.
+    Dans un contexte de détection, une crise manquée coûte plus qu'une fausse
+    alerte, mais trop de fausses alertes rendent l'outil inutilisable : il faut
+    regarder les deux.
     """)
+
     md("""
     ## 9. Comparaison
-    Le tableau contient **16 configurations**, évaluées sur les mêmes fenêtres.
-    Les performances de validation interne et du test sont distinctes.
-    Aucune configuration n'est retouchée après lecture des résultats du test.
+    Les 38 configurations sur le même test. Le choix est déjà fait (section 7) ; ce
+    tableau sert à comprendre, pas à choisir.
     """)
     code("""
     display(presentation.metrics_table(experiment))
     presentation.comparison_plot(experiment, FIGURES)
-    selected_test = experiment['results'].set_index('configuration').loc[experiment['best']]
-    best_observed = experiment['results'].sort_values('f1', ascending=False).iloc[0]
-    observed_strategy, observed_model = best_observed.configuration.split('__')
+    """)
+    code("""
+    res = experiment['results'].set_index('configuration')
+
+    def pick(name, metric):
+        return res.loc[name, metric]
+
     display(Markdown(
-        f'Le modèle **sélectionné en CV** obtient sur le test une précision de '
-        f'**{selected_test.precision:.3f}**, un rappel de **{selected_test.recall:.3f}** '
-        f'et un F1 de **{selected_test.f1:.3f}**. '
-        f'Le plus grand F1 **observé sur ce test** est {best_observed.f1:.3f}, '
-        f'pour {eeg.MODELS[observed_model]} / {eeg.STRATEGIES[observed_strategy]}. '
-        'Cette différence illustre la variabilité entre enregistrements ; elle ne conduit '
-        'pas à sélectionner rétrospectivement le modèle sur le test.'
+        f"**Lecture.** Au seuil par défaut, sur ces quatre tracés, le jeu enrichi n'améliore pas tout. "
+        f"Il transforme le KNN (F1 {pick('base__original__knn', 'f1'):.2f} → {pick('improved__original__knn', 'f1'):.2f}) "
+        f"et élève l'AP de la forêt ({pick('base__original__rf', 'average_precision'):.2f} → "
+        f"{pick('improved__original__rf', 'average_precision'):.2f}), mais la forêt sur les 12 caractéristiques garde "
+        f"le meilleur F1 brut ({pick('base__original__rf', 'f1'):.2f} contre {pick('improved__original__rf', 'f1'):.2f}). "
+        "Avec 4 tracés, ce classement est fragile : la section 12 le vérifie sur les 16 tracés. "
+        "Les stratégies d'équilibrage déplacent le compromis (plus de rappel, moins de précision) sans ajouter d'information."
     ))
     """)
+
     md("""
     ## 10. Détection temporelle
-    **Q14.** Les supports temporels des fenêtres positives sont fusionnés lorsqu'ils
-    se touchent ou se recouvrent, dans un même tracé. Les bornes sont celles des
-    fenêtres, sans déplacer l'origine ni fixer une durée de crise arbitraire.
-    Cette reconstruction a une résolution liée au pas de 1 s et n'est pas une
-    estimation clinique précise des limites.
+    **Q14.** Les fenêtres positives qui se touchent ou se recouvrent forment un
+    épisode `[début de la première fenêtre ; fin de la dernière]`. Un épisode prédit
+    est apparié à une crise annotée si leur **IoU** (intersection / union) atteint
+    **0,3**, avec un appariement un à un.
 
-    Pour l'analyse événementielle complémentaire, l'appariement est un à un,
-    avec **IoU ≥ 0,3** fixée avant calcul : intersection des intervalles divisée
-    par leur union. Le meilleur modèle de validation interne est utilisé.
+    La sortie brute du classifieur produit beaucoup d'épisodes d'une ou deux fenêtres
+    isolées. Trois réglages les filtrent : un **lissage** du score sur 1, 3 ou 5
+    fenêtres, un **seuil**, et une **durée minimale** de 1 à 5 fenêtres consécutives.
+    Ils maximisent le F1 événementiel sur les **prédictions hors pli de
+    l'apprentissage**, puis sont figés avant d'être appliqués au test.
+    """)
+    code("""
+    presentation.show_source(eeg.smooth_scores, eeg.drop_short_runs, eeg.intervals_from_labels)
     """)
     code("""
     temporal = eeg.temporal_analysis(frame, events, experiment, OUT)
-    display(temporal['predicted'].rename(columns={'record_id': 'Enregistrement', 'event': 'Crise détectée',
-                                                  'start_s': 'Début prédit (s)', 'end_s': 'Fin prédite (s)'}))
-    display(temporal['details'].loc[temporal['details'].status != 'FP'].rename(columns={
+    params = temporal['params']
+    display(Markdown(f'**Réglages retenus hors pli :** lissage sur {params["smoothing"]} fenêtre(s), '
+                     f'seuil {params["threshold"]:.3f}, au moins {params["min_windows"]} fenêtre(s) consécutive(s).'))
+    presentation.postprocessing_plot(temporal, FIGURES)
+    display(presentation.comparison_table(temporal))
+    """)
+    code("""
+    display(temporal['details'].sort_values(['record_id', 'true_start_s', 'pred_start_s']).rename(columns={
         'record_id': 'Enregistrement', 'status': 'Résultat', 'true_start_s': 'Début réel (s)',
         'true_end_s': 'Fin réelle (s)', 'pred_start_s': 'Début prédit (s)', 'pred_end_s': 'Fin prédite (s)'
     }))
     presentation.temporal_plots(ROOT, events, validation, temporal, FIGURES)
     """)
+
     md("""
     ## 11. Analyse des erreurs
-    Les TP, FP, FN et TN au niveau des fenêtres sont affichés par enregistrement.
-    Les événements correctement appariés, manqués ou non appariés sont comptés
-    séparément. Un événement réel peut produire plusieurs fenêtres positives ;
-    les deux niveaux ne doivent pas être confondus. Il n'existe pas de nombre
-    naturel de TN au niveau des événements continus.
+    Fenêtres et épisodes sont comptés séparément : une crise de 20 s compte une
+    vingtaine de fenêtres mais un seul épisode.
     """)
     code("""
     display(temporal['windows'].rename(columns={'record_id': 'Enregistrement', 'accuracy': 'Accuracy',
                                                'precision': 'Précision', 'recall': 'Rappel', 'f1': 'F1'}))
-    display(temporal['events'].rename(columns={'record_id': 'Enregistrement', 'true_events': 'Crises réelles',
-                                              'predicted_events': 'Crises prédites', 'precision': 'Précision',
-                                              'recall': 'Rappel', 'f1': 'F1'}))
-    totals = temporal['events'][['TP', 'FP', 'FN']].sum()
-    event_recall = totals.TP / (totals.TP + totals.FN) if totals.TP + totals.FN else 0
-    event_precision = totals.TP / (totals.TP + totals.FP) if totals.TP + totals.FP else 0
-    test_hours = validation.loc[validation.record_id.isin(test_records), 'duration_s'].sum() / 3600
-    display(Markdown(f'**Événements, IoU ≥ 0,3 :** {totals.TP} TP, {totals.FP} FP, {totals.FN} FN ; '
-                     f'rappel {event_recall:.3f}, précision {event_precision:.3f}. '
-                     f'**Événements non appariés par heure : {totals.FP / test_hours:.1f}.**'))
-    display(temporal['details'].loc[temporal['details'].status == 'FP'].head(10))
+    display(temporal['events'].rename(columns={
+        'record_id': 'Enregistrement', 'true_events': 'Crises annotées', 'raw_predicted_events': 'Épisodes bruts',
+        'predicted_events': 'Épisodes post-traités', 'precision': 'Précision', 'recall': 'Rappel', 'f1': 'F1',
+        'false_alarms_per_hour': 'Fausses alarmes / h'}))
+    details = temporal['details'].assign(duration=lambda d: d.true_end_s - d.true_start_s,
+                                         predicted=lambda d: d.pred_end_s - d.pred_start_s)
+    missed = details[details.status == 'FN']
+    found = details[details.status == 'TP']
+    false = details[details.status == 'FP']
+    raw = temporal['events'].set_index('record_id').raw_predicted_events
+    lines = [f"**{len(missed)} crise(s) manquée(s)** sur {len(missed) + len(found)}, "
+             f"{len(false)} fausse(s) alarme(s)."]
+    if len(missed):
+        by_record = missed.groupby('record_id').duration.agg(['count', 'min', 'max'])
+        lines.append('Crises manquées par tracé : ' + ' ; '.join(
+            f"{rid} : {int(row['count'])} ({row['min']:.0f}–{row['max']:.0f} s, "
+            f"{int(raw[rid])} épisode(s) en sortie brute)" for rid, row in by_record.iterrows()) + '.')
+        lines.append(f"Plus courte crise retrouvée : {found.duration.min():.0f} s. "
+                     f"Plus longue crise manquée : {missed.duration.max():.0f} s.")
+    if len(false):
+        lines.append('Fausses alarmes : ' + ' ; '.join(
+            f"{r.record_id} à {r.pred_start_s:.0f}–{r.pred_end_s:.0f} s ({r.predicted:.0f} s)" for r in false.itertuples()) + '.')
+    display(Markdown(' '.join(lines)))
     """)
     md("""
-    Un événement non apparié peut être un artefact, une détection trop fragmentée,
-    un intervalle mal borné ou une anomalie non couverte par les annotations. Sans
-    revue clinique indépendante, sa cause n'est pas affirmée. Les fenêtres FN
-    peuvent correspondre à un début, une fin ou une portion d'une crise malgré un
-    événement finalement apparié. Les chronologies ci-dessus permettent de
-    distinguer ces situations ; les moyennes globales ne les remplacent pas.
+    Les omissions sont concentrées dans un seul tracé, où les scores restent bas
+    même pendant les crises : le modèle y sous-estime l'activité de crise, ce qui
+    tient davantage à l'enregistrement qu'à la durée des crises, puisqu'une crise
+    plus courte est retrouvée ailleurs. Les fausses alarmes durent aussi longtemps que des
+    crises réelles ; seule une relecture du tracé dirait s'il s'agit d'artefacts ou
+    d'absences non annotées. La validation « un enregistrement exclu » (section 12)
+    montre la même hétérogénéité d'un tracé à l'autre.
     """)
+
     md("""
     ## 12. Améliorations
-    Les deux solutions proposées ont été **réellement mesurées** sur le test
-    commun. Le sous-échantillonnage garde toutes les fenêtres de crises de
-    l'apprentissage et un nombre égal de fenêtres normales. Le suréchantillonnage
-    conserve les normales et multiplie les positives, par duplication ou SMOTE.
-
-    Prélever « 3 % des normales » ne donne pas exactement le même effectif que
-    « 3 % du total » : la règle correcte est `N_normal_retenu = N_crise`.
-    Ces opérations concernent des fenêtres déjà construites, pas un signal
-    artificiel obtenu en concaténant des morceaux.
+    **Rééchantillonnage.** Le sous-échantillonnage garde toutes les fenêtres de
+    crise de l'apprentissage et autant de fenêtres normales tirées au hasard. Le
+    suréchantillonnage garde les normales et multiplie les crises, par duplication
+    ou par SMOTE (interpolation entre crises voisines dans l'espace des
+    caractéristiques). La règle exacte est `N_normales_retenues = N_crises`.
     """)
     code("""
     resampling = experiment['results'].drop_duplicates('strategy')[[
@@ -450,67 +493,70 @@ def build():
     resampling.strategy = resampling.strategy.map(eeg.STRATEGIES)
     resampling.columns = ['Stratégie', 'Crises avant', 'Normales avant', 'Crises après', 'Normales après']
     display(resampling)
-    reference = experiment['results'].loc[experiment['results'].strategy == 'original']
-    before_after = experiment['results'].merge(reference[['model', 'precision', 'recall', 'f1']],
-                                               on='model', suffixes=('', '_reference'))
+    results = experiment['results']
+    reference = results.loc[results.strategy == 'original']
+    before_after = results.merge(reference[['feature_set', 'model', 'precision', 'recall', 'f1']],
+                                 on=['feature_set', 'model'], suffixes=('', '_ref'))
     for metric in ('precision', 'recall', 'f1'):
-        before_after['delta_' + metric] = before_after[metric] - before_after[metric + '_reference']
-    before_after = before_after.loc[before_after.strategy != 'original', [
-        'strategy', 'model', 'precision', 'delta_precision', 'recall', 'delta_recall', 'f1', 'delta_f1']]
-    before_after.strategy = before_after.strategy.map(eeg.STRATEGIES)
-    before_after.model = before_after.model.map(eeg.MODELS)
-    before_after.columns = ['Stratégie', 'Modèle', 'Précision', 'Δ précision', 'Rappel', 'Δ rappel', 'F1', 'Δ F1']
-    display(before_after)
-    before_after.to_csv(OUT / 'improvements_before_after.csv', index=False)
-    display(Markdown('**Interprétation :** un gain de rappel doit être lu avec le changement de '
-                     "précision et de F1. L'équilibrage ne crée pas d'information indépendante "
-                     'et ne garantit pas un meilleur résultat pour chaque modèle.'))
+        before_after['Δ ' + metric] = before_after[metric] - before_after[metric + '_ref']
+    before_after = before_after.loc[before_after.strategy != 'original']
+    pivot = before_after.pivot_table(index=['feature_set', 'strategy'], values=['Δ precision', 'Δ recall', 'Δ f1'],
+                                     aggfunc='mean').rename(index=eeg.FEATURE_SET_LABELS, level=0).rename(
+                                     index=eeg.STRATEGIES, level=1)
+    display(Markdown('**Variation moyenne sur les quatre modèles, par rapport à « sans équilibrage » (test).**'))
+    display(pivot[['Δ precision', 'Δ recall', 'Δ f1']])
+    """)
+    md("""
+    Le rééchantillonnage augmente le rappel et fait chuter la précision : il déplace
+    le seuil implicite du modèle sans lui apprendre quoi que ce soit de nouveau. Ce
+    déplacement s'obtient plus proprement en réglant le seuil du score, comme en
+    section 10. Les gains mesurés dans ce projet, confirmés ci-dessous sur les
+    16 tracés, viennent de trois sources :
+
+    1. **Les caractéristiques** (section 6) : retirer le décalage continu et passer en log.
+    2. **La sélection par AP** plutôt que par F1 au seuil 0,5.
+    3. **Le raisonnement par épisodes** (section 10) : lissage, seuil et durée minimale.
+
+    **Validation « un enregistrement exclu ».** Le test ne compte que 4 tracés. Pour
+    mesurer la variabilité, la configuration retenue et trois références fixées à
+    l'avance (l'ancien choix arbre + SMOTE, la forêt sur les 12 caractéristiques, la
+    forêt enrichie) sont réévaluées 16 fois, chaque tracé étant exclu à tour de rôle.
+    À chaque itération, le post-traitement est réglé sur les prédictions hors pli des
+    15 autres tracés.
+    """)
+    code("""
+    loro = eeg.leave_one_record_out(frame, events, eeg.loro_shortlist(best), OUT, force=RETRAIN)
+    display(presentation.loro_table(loro))
+    presentation.loro_plot(loro, FIGURES)
     """)
     md("""
     ### Conclusion et limites
-    Le notebook compare quatre familles de modèles et quatre stratégies avec des
-    horaires corrigés et une séparation sans partage d'enregistrement. Le choix
-    du modèle repose sur la validation interne et ses erreurs restent visibles.
+    Avec un seul canal et une forêt aléatoire, la chaîne retrouve la grande majorité
+    des crises de cette cohorte avec quelques fausses alarmes par heure, à condition
+    de retirer le décalage continu, d'utiliser des caractéristiques indépendantes de
+    l'échelle de chaque tracé et de raisonner en épisodes. L'équilibrage des classes
+    pèse peu face à ces trois choix.
 
-    La cohorte de **16 tracés / 65 crises** est petite ; le test comprend quatre
-    tracés. Les plis groupés et leurs écarts-types rendent cette variabilité
-    visible. La séparation par enregistrement ne garantit pas une séparation
-    par patient, faute d'identifiant patient fiable. Le canal unique, les artefacts,
-    les annotations exclues, les unités d'amplitude et la plausibilité des
-    interpolations SMOTE limitent la portée des conclusions. Les données ne sont
-    pas une validation clinique externe.
-
-    Parmi les perspectives : résoudre les annotations conflictuelles, valider sur
-    une autre cohorte, explorer d'autres canaux ou fenêtres et ajuster les seuils
-    uniquement en validation sur l'apprentissage. Aucune performance de ces
-    perspectives n'est inventée.
-
-    **Sources :** énoncé `mini-prjet-data-mining.pdf`, classeur `Annotations MAJ.xlsx`
-    et message de l'enseignant ; [pipeline imbalanced-learn](https://imbalanced-learn.org/stable/references/generated/imblearn.pipeline.Pipeline.html),
-    [rééchantillonnage et fuites](https://imbalanced-learn.org/stable/common_pitfalls.html),
-    [StratifiedGroupKFold](https://scikit-learn.org/stable/modules/generated/sklearn.model_selection.StratifiedGroupKFold.html),
-    [SMOTE, Chawla et al.](https://arxiv.org/abs/1106.1813).
+    **Limites.** 16 enregistrements sans identifiant patient fiable ; un seul canal ;
+    annotations sans double relecture ; hyperparamètres non optimisés ; la normalisation
+    par enregistrement suppose un tracé long, dominé par l'activité de fond. Les
+    chiffres LORO, plus prudents que ceux du test réservé, sont ceux à retenir.
     """)
     code("""
-    report_path = presentation.write_report(ROOT, cohort, events, counts, frame, experiment, temporal, gaps)
+    report_path = presentation.write_report(ROOT, cohort, events, counts, frame, experiment, temporal, loro, gaps)
     assert train_records.isdisjoint(test_records)
-    assert len(experiment['results']) == 16 and len(experiment['cv']) == 48
+    assert len(experiment['results']) == 38 and len(experiment['cv']) == 38 * 3
     assert validation[['source_values_match', 'source_names_match', 'source_times_match']].all().all()
-    display(Markdown('**Livrables générés :** notebook exécuté, rapport français `reports/RAPPORT_FINAL_EEG.md`, '
-                     'figures, tableaux CSV, contrôles source et modèle sélectionné dans `artifacts/final/`.'))
+    display(Markdown(f'**Rapport régénéré :** `{report_path.relative_to(ROOT)}`, figures dans `reports/figures/`.'))
     """)
+
     notebook = nbformat.v4.new_notebook(cells=cells)
     for index, cell in enumerate(cells):
         if cell.cell_type == "code":
             ast.parse(cell.source, filename=f"cellule_{index + 1}")
     notebook.metadata = {
-        "kernelspec": {
-            "display_name": "Python (DM-project)",
-            "language": "python",
-            "name": "python3",
-        },
-        "language_info": {"name": "python", "version": "3.13.7"},
-        "eeg_project_final": True,
+        "kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"},
+        "language_info": {"name": "python"},
     }
     path = ROOT / "notebooks/mini_projet_eeg_final.ipynb"
     nbformat.validate(notebook)

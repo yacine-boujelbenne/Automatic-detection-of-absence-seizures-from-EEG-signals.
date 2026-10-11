@@ -1,8 +1,6 @@
 [tool.ruff]
 line-length = 100
 target-version = "py313"
-# .claude/ est du code de reference verifie (76 tests) : il n'est pas reformate
-# automatiquement, sinon la suite de reference pourrait diverger.
 extend-exclude = ["venv", ".runtime", "data", "artifacts", ".ipynb_checkpoints", ".claude"]
 
 [tool.ruff.lint]
@@ -17,5 +15,5 @@ ignore = [
 "notebooks/*" = ["E402", "F811", "B018"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", ".claude/skills/eeg-pipeline/reference"]
+testpaths = ["tests"]
 addopts = "-q"

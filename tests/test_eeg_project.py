@@ -91,3 +91,56 @@ def test_sampler_is_inside_each_pipeline():
         pipe = eeg.make_model("dt", strategy, 20)
         assert list(pipe.named_steps) == ["scale", "sampling", "model"]
         assert pipe.named_steps["model"].random_state == 42
+
+
+def test_short_runs_are_removed_and_long_runs_kept():
+    """Une suite plus courte que la durée minimale disparaît, les autres restent intactes."""
+    labels = np.array([1, 0, 1, 1, 0, 1, 1, 1, 0], dtype=bool)
+    kept = eeg.drop_short_runs(labels, 3)
+    np.testing.assert_array_equal(kept, [0, 0, 0, 0, 0, 1, 1, 1, 0])
+    np.testing.assert_array_equal(eeg.drop_short_runs(labels, 1), labels)
+
+
+def test_vectorised_reconstruction_matches_reference():
+    """La reconstruction rapide donne les mêmes épisodes que la version ligne à ligne."""
+    rng = np.random.default_rng(0)
+    starts = np.arange(200, dtype=float)
+    frame = pd.DataFrame({"record_id": "a", "start_s": starts, "end_s": starts + 2})
+    for _ in range(20):
+        labels = rng.random(200) < 0.2
+        assert eeg.intervals_from_labels(starts, starts + 2, labels) == eeg.reconstruct_intervals(
+            frame, labels
+        )
+
+
+def test_smoothing_preserves_constant_scores():
+    """Le lissage normalise ses bords : un score constant reste constant."""
+    np.testing.assert_allclose(eeg.smooth_scores(np.full(7, 0.4), 5), 0.4)
+
+
+def test_highpass_removes_offset():
+    """Le filtre passe-haut retire le décalage continu qui identifiait les tracés."""
+    fs = 256
+    t = np.arange(20 * fs) / fs
+    signal = 500 + 10 * np.sin(2 * np.pi * 3 * t)
+    filtered = eeg.highpass(signal, fs)
+    assert abs(filtered[fs:-fs].mean()) < 0.1
+    assert filtered[fs:-fs].std() == pytest.approx(10 / np.sqrt(2), rel=0.02)
+
+
+def test_robust_normalisation_is_label_free_and_bounded():
+    """La normalisation par tracé ne voit que les caractéristiques, et reste bornée."""
+    features = pd.DataFrame({"x": np.r_[np.zeros(50), np.ones(50), 1e6]})
+    normalised = eeg.robust_normalize(features)
+    assert normalised.x.max() == 10
+    assert normalised.x.median() == pytest.approx(0, abs=0.5)
+
+
+def test_balanced_strategy_sets_class_weight():
+    """La pondération passe par le classifieur, sans échantillonneur."""
+    pipe = eeg.make_model("rf", "balanced", 20)
+    assert pipe.named_steps["sampling"] == "passthrough"
+    assert pipe.named_steps["model"].class_weight == "balanced"
+    with pytest.raises(ValueError):
+        eeg.make_model("knn", "balanced", 20)
+    assert len(eeg.configurations()) == 38

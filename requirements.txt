@@ -1,5 +1,5 @@
-# Versions utilisées avec Python 3.13.7 pour le notebook final exécuté.
-# Installation : venv/Scripts/python.exe -m pip install -r requirements.txt
+# Versions utilisées pour le notebook final exécuté (Python 3.12 et 3.13).
+# Installation : python -m venv .venv puis .venv/bin/python -m pip install -r requirements.txt
 numpy==2.5.3
 pandas==3.0.6
 scipy==1.18.1

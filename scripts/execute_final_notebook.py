@@ -1,7 +1,8 @@
-"""Exécute toutes les cellules avec le Python du projet et exporte une présentation HTML."""
+"""Exécute toutes les cellules avec l'interpréteur courant et exporte une présentation HTML."""
 
 import json
 import os
+import sys
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -31,7 +32,7 @@ def execute(runtime):
     kernel_path.mkdir(parents=True, exist_ok=True)
     specification = {
         "argv": [
-            str(ROOT / "venv/Scripts/python.exe"),
+            sys.executable,
             "-m",
             "ipykernel_launcher",
             "-f",

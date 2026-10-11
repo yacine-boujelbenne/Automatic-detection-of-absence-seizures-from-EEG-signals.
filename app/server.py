@@ -18,8 +18,10 @@ from app.inference import (  # noqa: E402
     MAX_UPLOAD,
     InputError,
     analyze,
+    load_catalogue,
     load_detector,
     load_recording,
+    load_reference,
     trace_points,
 )
 
@@ -33,6 +35,8 @@ class EEGServer(ThreadingHTTPServer):
 
     def __init__(self, address):
         self.pipeline, self.metadata = load_detector()
+        self.reference = load_reference()
+        self.catalogue = load_catalogue()
         self.analyses = OrderedDict()
         self.analysis_lock = threading.Lock()
         self.cache_lock = threading.Lock()
@@ -62,7 +66,7 @@ class EEGServer(ThreadingHTTPServer):
 class Handler(BaseHTTPRequestHandler):
     """Fichiers statiques explicitement autorisés et API de prédiction."""
 
-    server_version = "NeuroTrace/1.0"
+    server_version = "LecteurAbsences/2.0"
 
     def setup(self):
         super().setup()
@@ -80,7 +84,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+        )
         self.end_headers()
         try:
             self.wfile.write(body)
@@ -96,23 +103,38 @@ class Handler(BaseHTTPRequestHandler):
             self.send(403, {"error": "Accès local uniquement."})
             return
         target = urlsplit(self.path)
-        routes = {"/": ("index.html", "text/html; charset=utf-8"), "/style.css": ("style.css", "text/css; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8")}
+        routes = {
+            "/": ("index.html", "text/html; charset=utf-8"),
+            "/style.css": ("style.css", "text/css; charset=utf-8"),
+            "/app.js": ("app.js", "text/javascript; charset=utf-8"),
+        }
         if target.path in routes:
             name, mime = routes[target.path]
             self.send(200, (STATIC / name).read_bytes(), mime)
         elif target.path == "/api/model":
             self.send(200, self.server.metadata)
+        elif target.path == "/api/recordings":
+            hidden = {"source_sha256", "export_sha256"}
+            rows = [
+                {k: v for k, v in row.items() if k not in hidden}
+                for row in self.server.catalogue.values()
+            ]
+            self.send(200, {"recordings": rows})
         elif target.path == "/api/health":
-            self.send(200, {"status": "ready", "configuration": self.server.metadata["configuration"]})
+            self.send(
+                200, {"status": "ready", "configuration": self.server.metadata["configuration"]}
+            )
         elif target.path == "/api/trace":
             try:
                 query = parse_qs(target.query)
                 recording, _, _ = self.server.recall(query.get("id", [""])[0])
                 start = float(query.get("start", ["0"])[0])
                 end = float(query.get("end", ["30"])[0])
-                if not 0 <= start < end <= len(recording.signal) / recording.fs + 1e-6:
+                budget = int(query.get("budget", ["4000"])[0])
+                end = min(end, len(recording.signal) / recording.fs)
+                if not 0 <= start < end or not 200 <= budget <= 12000:
                     raise InputError("Intervalle du zoom invalide.")
-                self.send(200, trace_points(recording, start, end))
+                self.send(200, trace_points(recording, start, end, budget))
             except (InputError, ValueError) as exc:
                 self.send(400, {"error": str(exc)})
         else:
@@ -125,36 +147,66 @@ class Handler(BaseHTTPRequestHandler):
         }:
             self.send(403, {"error": "L'analyse doit être lancée depuis l'interface locale."})
             return
-        if self.path not in {"/api/analyze", "/api/demo"}:
+        if self.path not in {"/api/analyze", "/api/open"}:
             self.send(404, {"error": "Action inconnue."})
             return
         if not self.server.analysis_lock.acquire(blocking=False):
             self.send(409, {"error": "Une analyse est déjà en cours. Patientez puis réessayez."})
             return
         try:
-            if self.path == "/api/demo":
-                path = ROOT / "data/exports/211104B_D.npz"
+            if self.path == "/api/open":
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= 1024:
+                    raise InputError("Requête d'ouverture invalide.")
+                body = json.loads(self.rfile.read(length))
+                record = body.get("record", "") if isinstance(body, dict) else ""
+                record = str(record).strip().upper()
+                if record not in self.server.catalogue:
+                    raise InputError(
+                        f"Identifiant inconnu : {record or '(vide)'}. Exemple : 190304A-E."
+                    )
+                if not self.server.catalogue[record]["available"]:
+                    raise InputError(f"{record} : {self.server.catalogue[record]['reason']}.")
+                path = ROOT / "data/exports" / f"{record.replace('-', '_')}.npz"
                 payload, filename = path.read_bytes(), path.name
             else:
                 length = int(self.headers.get("Content-Length", "0"))
                 if not 0 < length <= MAX_UPLOAD:
                     self.send(413, {"error": "Choisissez un fichier non vide de moins de 128 Mio."})
                     return
-                filename = unquote(self.headers.get("X-Filename", "")).replace("\\", "/").split("/")[-1]
+                filename = (
+                    unquote(self.headers.get("X-Filename", "")).replace("\\", "/").split("/")[-1]
+                )
                 if not filename or len(filename) > 200 or not filename.isprintable():
                     raise InputError("Le nom du fichier est invalide.")
                 payload = self.rfile.read(length)
                 if len(payload) != length:
                     raise InputError("Le transfert est incomplet. Réessayez le dépôt du fichier.")
             recording = load_recording(payload, filename, self.server.metadata["fs_hz"])
-            result = analyze(recording, self.server.pipeline, self.server.metadata)
+            result = analyze(
+                recording,
+                self.server.pipeline,
+                self.server.metadata,
+                self.server.reference,
+                self.server.catalogue,
+            )
             self.send(200, self.server.remember(recording, result))
         except InputError as exc:
             self.send(400, {"error": str(exc)})
         except (TimeoutError, ValueError):
-            self.send(400, {"error": "Transfert interrompu ou requête incorrecte. Réessayez avec un fichier compatible."})
+            self.send(
+                400,
+                {
+                    "error": "Transfert interrompu ou requête incorrecte. Réessayez avec un fichier compatible."
+                },
+            )
         except Exception:
-            self.send(500, {"error": "L'analyse n'a pas abouti. Vérifiez le fichier et redémarrez l'application si nécessaire."})
+            self.send(
+                500,
+                {
+                    "error": "L'analyse n'a pas abouti. Vérifiez le fichier et redémarrez l'application si nécessaire."
+                },
+            )
         finally:
             self.server.analysis_lock.release()
 
@@ -164,7 +216,7 @@ def main():
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
     with EEGServer(("127.0.0.1", args.port)) as server:
-        print(f"NeuroTrace est prêt : http://127.0.0.1:{server.server_address[1]}", flush=True)
+        print(f"Lecteur d'absences prêt : http://127.0.0.1:{server.server_address[1]}", flush=True)
         print("Arrêt : Ctrl+C. Les enregistrements déposés restent sur cette machine.", flush=True)
         try:
             server.serve_forever()
