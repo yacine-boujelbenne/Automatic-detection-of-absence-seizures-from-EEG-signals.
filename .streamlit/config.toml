@@ -1,0 +1,66 @@
+[server]
+address = "127.0.0.1"
+port = 8501
+headless = true
+maxUploadSize = 128
+runOnSave = false
+# Sert app/static/ (polices auto-hébergées) : l'interface fonctionne hors ligne.
+enableStaticServing = true
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"
+
+# Thème clair « clinique » : les mêmes valeurs sont reprises comme variables CSS dans
+# app/static/theme.css et dans le gabarit Plotly de app/figures.py.
+[theme]
+base = "light"
+primaryColor = "#0B6280"
+backgroundColor = "#F5F7FA"
+secondaryBackgroundColor = "#EEF2F6"
+textColor = "#0F172A"
+borderColor = "#D5DBE4"
+font = "Manrope, sans-serif"
+headingFont = "Space Grotesk, sans-serif"
+codeFont = "JetBrains Mono, monospace"
+baseRadius = "10px"
+showWidgetBorder = true
+
+[[theme.fontFaces]]
+family = "Manrope"
+url = "app/static/fonts/manrope-latin-400-normal.woff2"
+weight = 400
+[[theme.fontFaces]]
+family = "Manrope"
+url = "app/static/fonts/manrope-latin-500-normal.woff2"
+weight = 500
+[[theme.fontFaces]]
+family = "Manrope"
+url = "app/static/fonts/manrope-latin-600-normal.woff2"
+weight = 600
+[[theme.fontFaces]]
+family = "Manrope"
+url = "app/static/fonts/manrope-latin-700-normal.woff2"
+weight = 700
+[[theme.fontFaces]]
+family = "Space Grotesk"
+url = "app/static/fonts/space-grotesk-latin-600-normal.woff2"
+weight = 600
+[[theme.fontFaces]]
+family = "Space Grotesk"
+url = "app/static/fonts/space-grotesk-latin-700-normal.woff2"
+weight = 700
+[[theme.fontFaces]]
+family = "JetBrains Mono"
+url = "app/static/fonts/jetbrains-mono-latin-400-normal.woff2"
+weight = 400
+[[theme.fontFaces]]
+family = "JetBrains Mono"
+url = "app/static/fonts/jetbrains-mono-latin-500-normal.woff2"
+weight = 500
+[[theme.fontFaces]]
+family = "JetBrains Mono"
+url = "app/static/fonts/jetbrains-mono-latin-600-normal.woff2"
+weight = 600

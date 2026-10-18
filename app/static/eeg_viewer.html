@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<style>
+/* Lecteur EEG : tout se passe dans le navigateur (aucun aller-retour vers Python pendant la lecture).
+   Couleurs injectées depuis app/figures.py (THEME) : une seule source pour tout le site. */
+@font-face { font-family: "Manrope"; src: url("/app/static/fonts/manrope-latin-500-normal.woff2") format("woff2"); font-weight: 500; }
+@font-face { font-family: "Manrope"; src: url("/app/static/fonts/manrope-latin-600-normal.woff2") format("woff2"); font-weight: 600; }
+@font-face { font-family: "JetBrains Mono"; src: url("/app/static/fonts/jetbrains-mono-latin-400-normal.woff2") format("woff2"); font-weight: 400; }
+:root { __CSSVARS__ }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: transparent; color: var(--text); font: 500 13px/1.4 "Manrope", system-ui, sans-serif; }
+.bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; padding: 2px 0 10px; }
+.grp { display: inline-flex; align-items: center; gap: 8px; }
+.lbl { font-size: 11px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--text2); }
+.seg { display: inline-flex; background: var(--raised); border-radius: 8px; padding: 3px; gap: 2px; }
+.seg button, .btn { font: 400 12px/18px "JetBrains Mono", monospace; color: var(--text2); background: none; border: 0;
+  border-radius: 6px; padding: 3px 10px; cursor: pointer; transition: background .15s, color .15s; }
+.seg button:hover { color: var(--text); background: var(--surface); }
+.seg button[aria-pressed="true"] { color: var(--text); background: var(--surface); box-shadow: 0 1px 2px rgba(16,24,40,.12); }
+.btn { border: 1px solid var(--border); background: var(--surface); width: 28px; padding: 3px 0; color: var(--text); }
+.btn:hover { border-color: var(--accent); color: var(--accent); }
+.btn:active { transform: translateY(1px); }
+.gain { font: 400 12px "JetBrains Mono", monospace; min-width: 44px; text-align: center; }
+.layer { display: inline-flex; align-items: center; gap: 7px; font: 500 12px "Manrope", sans-serif; color: var(--text);
+  background: none; border: 1px solid transparent; border-radius: 6px; padding: 3px 8px; cursor: pointer; }
+.layer:hover { border-color: var(--hairline); background: var(--surface); }
+.layer[aria-pressed="false"] { color: var(--muted); text-decoration: line-through; }
+.layer[aria-pressed="false"] .sw { opacity: .35; }
+.sw { width: 18px; height: 10px; border-radius: 2px; display: inline-block; }
+.sw.ann { background: var(--annFill); box-shadow: inset 0 2px 0 var(--ann); }
+.sw.det { background: repeating-linear-gradient(135deg, var(--detFill) 0 4px, var(--det) 4px 5px); box-shadow: inset 1px 0 0 var(--det), inset -1px 0 0 var(--det); }
+.pos { margin-left: auto; font: 400 12px "JetBrains Mono", monospace; color: var(--text2); }
+.help { color: var(--muted); font-size: 12px; cursor: help; border-bottom: 1px dotted var(--muted); }
+.frame { position: relative; background: var(--surface); border: 1px solid var(--hairline); border-radius: 12px; overflow: hidden; }
+canvas { display: block; width: 100%; }
+#main { cursor: grab; outline: none; }
+#main.drag { cursor: grabbing; }
+#main:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+#mini { cursor: pointer; border-top: 1px solid var(--hairline); }
+.tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--hairline); border-radius: 8px;
+  padding: 5px 9px; font: 400 12px/17px "JetBrains Mono", monospace; color: var(--text); box-shadow: 0 6px 18px rgba(16,24,40,.12);
+  white-space: nowrap; display: none; z-index: 2; }
+.tip b { color: var(--accent); font-weight: 400; }
+.foot { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 8px; color: var(--muted); font-size: 12px; }
+kbd { font: 400 11px "JetBrains Mono", monospace; border: 1px solid var(--hairline); border-bottom-width: 2px; border-radius: 4px;
+  padding: 0 4px; background: var(--surface); color: var(--text2); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="bar" role="toolbar" aria-label="Réglages du tracé">
+  <span class="grp"><span class="lbl">Durée</span><span class="seg" id="win"></span></span>
+  <span class="grp"><span class="lbl">Gain</span><button class="btn" id="gdown" aria-label="Réduire l'amplitude">−</button>
+    <output class="gain" id="gain">×1</output><button class="btn" id="gup" aria-label="Augmenter l'amplitude">+</button></span>
+  <span class="grp" id="layers"></span>
+  <span class="pos" id="pos" aria-live="polite"></span>
+</div>
+<div class="frame">
+  <canvas id="main" tabindex="0" role="img" aria-label="Tracé EEG multivoie. Flèches gauche et droite pour se déplacer."></canvas>
+  <canvas id="mini" role="slider" aria-label="Vue d'ensemble de l'enregistrement"></canvas>
+  <div class="tip" id="tip"></div>
+</div>
+<div class="foot">
+  <span>Glisser le tracé ou la vue d'ensemble pour se déplacer</span>
+  <span><kbd>←</kbd> <kbd>→</kbd> demi-fenêtre · <kbd>Maj</kbd> fenêtre entière</span>
+  <span><kbd>+</kbd> <kbd>−</kbd> durée · <kbd>↑</kbd> <kbd>↓</kbd> gain</span>
+  <span><kbd>A</kbd> annotées · <kbd>D</kbd> détectées</span>
+</div>
+<script>
+"use strict";
+const P = __PAYLOAD__;
+const C = __COLORS__;
+
+// ---------- données : Int16 en base64 → Float32 ----------
+const channels = P.channels.map((name, k) => {
+  const bin = atob(P.data[k]);
+  const view = new Int16Array(bin.length / 2);
+  for (let i = 0; i < view.length; i++) view[i] = (bin.charCodeAt(2 * i) | (bin.charCodeAt(2 * i + 1) << 8)) << 16 >> 16;
+  const values = new Float32Array(view.length);
+  for (let i = 0; i < view.length; i++) values[i] = view[i] * P.step;
+  return { name, values };
+});
+const N = channels[0].values.length, FS = P.fs, DUR = N / FS;
+// Échelle de base : 99e centile de l'amplitude absolue sur l'ensemble des voies affichées.
+const BASE = (() => {
+  const sample = [];
+  for (const c of channels) for (let i = 0; i < c.values.length; i += 37) sample.push(Math.abs(c.values[i]));
+  sample.sort((a, b) => a - b);
+  return sample[Math.floor(sample.length * 0.99)] || 1;
+})();
+
+const S = { start: Math.max(0, Math.min(P.start, DUR - P.window)), win: P.window, gain: 1, ann: true, det: P.detected.length > 0 };
+const GAINS = [0.25, 0.5, 1, 1.5, 2, 3, 4], WINS = [10, 20, 30, 60];
+const LANE = 42, TOP = 6, AXIS = 22, LEFT = 46, MINI_H = P.score ? 86 : 56;
+
+const main = document.getElementById("main"), mini = document.getElementById("mini"), tip = document.getElementById("tip");
+const mctx = main.getContext("2d"), nctx = mini.getContext("2d");
+
+function sizeCanvas(cv, h) {
+  const dpr = window.devicePixelRatio || 1, w = cv.clientWidth;
+  cv.style.height = h + "px"; cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+  const ctx = cv.getContext("2d"); ctx.setTransform(dpr, 0, 0, dpr, 0, 0); return w;
+}
+const clock = s => { const m = Math.floor(s / 60), r = s - 60 * m; return `${String(m).padStart(2, "0")}:${r.toFixed(1).padStart(4, "0")}`; };
+
+// ---------- tracé principal ----------
+function drawMain() {
+  const h = TOP + LANE * channels.length + AXIS, w = sizeCanvas(main, h), ctx = mctx;
+  const x0 = LEFT, x1 = w - 10, t2x = t => x0 + (t - S.start) / S.win * (x1 - x0);
+  ctx.clearRect(0, 0, w, h);
+  // zones : annotées (aplat + liseré haut), détectées (hachures + bords)
+  const y0 = TOP, y1 = TOP + LANE * channels.length;
+  if (S.ann) for (const [a, b] of P.annotated) {
+    if (b < S.start || a > S.start + S.win) continue;
+    const xa = Math.max(x0, t2x(a)), xb = Math.min(x1, t2x(b));
+    ctx.fillStyle = C.annFill; ctx.fillRect(xa, y0, xb - xa, y1 - y0);
+    ctx.fillStyle = C.ann; ctx.fillRect(xa, y0, xb - xa, 2);
+  }
+  if (S.det) for (const [a, b] of P.detected) {
+    if (b < S.start || a > S.start + S.win) continue;
+    const xa = Math.max(x0, t2x(a)), xb = Math.min(x1, t2x(b));
+    ctx.save(); ctx.beginPath(); ctx.rect(xa, y0, xb - xa, y1 - y0); ctx.clip();
+    ctx.fillStyle = C.detFill; ctx.fillRect(xa, y0, xb - xa, y1 - y0);
+    ctx.strokeStyle = C.detHatch; ctx.lineWidth = 1;
+    for (let x = xa - (y1 - y0); x < xb; x += 7) { ctx.beginPath(); ctx.moveTo(x, y1); ctx.lineTo(x + (y1 - y0), y0); ctx.stroke(); }
+    ctx.restore();
+    ctx.fillStyle = C.det; ctx.fillRect(xa, y0, 1, y1 - y0); ctx.fillRect(xb - 1, y0, 1, y1 - y0);
+  }
+  // grille de lecture : 0,2 s fine, 1 s marquée, étiquettes toutes les 1, 2 ou 5 s selon la durée
+  const label = S.win <= 10 ? 1 : S.win <= 30 ? 2 : 5;
+  for (let t = Math.ceil(S.start / 0.2) * 0.2; t <= S.start + S.win + 1e-9; t += 0.2) {
+    const whole = Math.abs(t - Math.round(t)) < 1e-6, x = Math.round(t2x(t)) + 0.5;
+    if (S.win > 30 && !whole) continue;
+    ctx.strokeStyle = whole ? C.grid : C.gridMinor; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x, y1); ctx.stroke();
+    if (whole && Math.round(t) % label === 0) {
+      ctx.fillStyle = C.text2; ctx.font = '400 11px "JetBrains Mono", monospace'; ctx.textAlign = "center";
+      ctx.fillText(String(Math.round(t)), x, y1 + 15);
+    }
+  }
+  // voies
+  const scale = (LANE * 0.42) / BASE * S.gain;
+  const i0 = Math.max(0, Math.floor(S.start * FS)), i1 = Math.min(N, Math.ceil((S.start + S.win) * FS) + 1);
+  const step = Math.max(1, Math.floor((i1 - i0) / ((x1 - x0) * 2)));
+  channels.forEach((c, k) => {
+    const mid = TOP + LANE * k + LANE / 2;
+    ctx.strokeStyle = C.hair; ctx.beginPath(); ctx.moveTo(x0, mid + 0.5); ctx.lineTo(x1, mid + 0.5); ctx.stroke();
+    ctx.fillStyle = k === S.hoverLane ? C.accent : C.text2; ctx.font = '400 11px "JetBrains Mono", monospace'; ctx.textAlign = "right";
+    ctx.fillText(c.name, x0 - 8, mid + 4);
+    ctx.save(); ctx.beginPath(); ctx.rect(x0, TOP + LANE * k - LANE * 0.4, x1 - x0, LANE * 1.8); ctx.clip();
+    ctx.strokeStyle = k === S.hoverLane ? C.accent : C.trace; ctx.lineWidth = 1; ctx.beginPath();
+    for (let i = i0; i < i1; i += step) {
+      let lo = c.values[i], hi = lo;
+      for (let j = i + 1; j < Math.min(i + step, i1); j++) { const v = c.values[j]; if (v < lo) lo = v; if (v > hi) hi = v; }
+      const x = t2x(i / FS);
+      if (i === i0) ctx.moveTo(x, mid - hi * scale); else ctx.lineTo(x, mid - hi * scale);
+      if (step > 1) ctx.lineTo(x, mid - lo * scale);
+    }
+    ctx.stroke(); ctx.restore();
+  });
+  document.getElementById("pos").textContent = `${clock(S.start)} – ${clock(S.start + S.win)} / ${clock(DUR)}`;
+  document.getElementById("gain").textContent = "×" + String(S.gain).replace(".", ",");
+}
+
+// ---------- vue d'ensemble : activité, zones, score, cadre de la fenêtre ----------
+let ENVELOPE = null;
+function drawMini() {
+  const w = sizeCanvas(mini, MINI_H), ctx = nctx, x0 = LEFT, x1 = w - 10, t2x = t => x0 + t / DUR * (x1 - x0);
+  ctx.clearRect(0, 0, w, MINI_H);
+  const bandTop = 8, bandH = P.score ? 34 : MINI_H - 24;
+  if (!ENVELOPE || ENVELOPE.length !== Math.round(x1 - x0)) {
+    const px = Math.round(x1 - x0); ENVELOPE = new Float32Array(px);
+    for (let p = 0; p < px; p++) {
+      const a = Math.floor(p / px * N), b = Math.max(a + 1, Math.floor((p + 1) / px * N)); let s = 0, n = 0;
+      for (const c of channels) for (let i = a; i < b; i += 4) { s += Math.abs(c.values[i]); n++; }
+      ENVELOPE[p] = n ? s / n : 0;
+    }
+  }
+  const top = ENVELOPE.reduce((m, v) => Math.max(m, v), 0) || 1;
+  for (const [a, b] of P.annotated) { ctx.fillStyle = C.annFill; ctx.fillRect(t2x(a), bandTop, Math.max(2, t2x(b) - t2x(a)), bandH); ctx.fillStyle = C.ann; ctx.fillRect(t2x(a), bandTop, Math.max(2, t2x(b) - t2x(a)), 2); }
+  ctx.fillStyle = C.trace; ctx.globalAlpha = 0.55;
+  for (let p = 0; p < ENVELOPE.length; p++) { const v = ENVELOPE[p] / top * bandH; ctx.fillRect(x0 + p, bandTop + bandH - v, 1, v); }
+  ctx.globalAlpha = 1;
+  for (const [a, b] of P.detected) { ctx.fillStyle = C.det; ctx.fillRect(t2x(a), bandTop + bandH + 2, Math.max(2, t2x(b) - t2x(a)), 4); }
+  if (P.score) {
+    const sy0 = bandTop + bandH + 10, sh = MINI_H - sy0 - 14, sc = P.score;
+    const vmax = sc.v.reduce((m, v) => Math.max(m, v), sc.thr * 1.2);
+    const y = v => sy0 + sh - Math.min(1, v / vmax) * sh;
+    ctx.strokeStyle = C.accent; ctx.lineWidth = 1; ctx.beginPath();
+    sc.t.forEach((t, i) => { const x = t2x(t); i ? ctx.lineTo(x, y(sc.v[i])) : ctx.moveTo(x, y(sc.v[i])); }); ctx.stroke();
+    ctx.setLineDash([3, 3]); ctx.strokeStyle = C.text2; ctx.beginPath(); ctx.moveTo(x0, y(sc.thr)); ctx.lineTo(x1, y(sc.thr)); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = C.text2; ctx.font = '500 10px "Manrope", sans-serif'; ctx.textAlign = "right"; ctx.fillText("score", x0 - 8, y(vmax / 2) + 3);
+  }
+  ctx.fillStyle = C.text2; ctx.font = '500 10px "Manrope", sans-serif'; ctx.textAlign = "right"; ctx.fillText("tracé", x0 - 8, bandTop + bandH / 2 + 3);
+  // fenêtre affichée
+  const xa = t2x(S.start), xb = t2x(S.start + S.win);
+  ctx.fillStyle = C.viewFill; ctx.fillRect(xa, 2, xb - xa, MINI_H - 16);
+  ctx.strokeStyle = C.accent; ctx.lineWidth = 1.5; ctx.strokeRect(xa + 0.5, 2.5, xb - xa - 1, MINI_H - 17);
+  ctx.fillStyle = C.muted; ctx.font = '400 10px "JetBrains Mono", monospace'; ctx.textAlign = "center";
+  for (let t = 0; t <= DUR; t += DUR > 900 ? 120 : 60) ctx.fillText(clock(t).slice(0, 5), t2x(t), MINI_H - 3);
+}
+function draw() { drawMain(); drawMini(); }
+
+// ---------- interactions ----------
+const clamp = s => Math.max(0, Math.min(DUR - S.win, s));
+function move(to) { S.start = clamp(to); draw(); }
+function setWin(w) { const c = S.start + S.win / 2; S.win = Math.min(w, DUR); S.start = clamp(c - S.win / 2); renderWin(); draw(); }
+function setGain(dir) { const i = GAINS.indexOf(S.gain) + dir; if (i >= 0 && i < GAINS.length) { S.gain = GAINS[i]; draw(); } }
+function renderWin() {
+  const box = document.getElementById("win"); box.innerHTML = "";
+  for (const w of WINS) { const b = document.createElement("button"); b.textContent = w + " s"; b.setAttribute("aria-pressed", String(w === S.win)); b.onclick = () => setWin(w); box.appendChild(b); }
+}
+function renderLayers() {
+  const box = document.getElementById("layers"); box.innerHTML = "";
+  const add = (key, cls, text, enabled) => {
+    const b = document.createElement("button"); b.className = "layer"; b.disabled = !enabled;
+    b.innerHTML = `<span class="sw ${cls}"></span>${text}`; b.setAttribute("aria-pressed", String(S[key] && enabled));
+    b.onclick = () => { S[key] = !S[key]; renderLayers(); draw(); }; box.appendChild(b);
+  };
+  add("ann", "ann", "crises annotées", P.annotated.length > 0);
+  add("det", "det", "crises détectées", P.detected.length > 0);
+}
+document.getElementById("gdown").onclick = () => setGain(-1);
+document.getElementById("gup").onclick = () => setGain(1);
+
+let drag = null;
+main.addEventListener("pointerdown", e => { drag = { x: e.clientX, start: S.start }; main.classList.add("drag"); main.setPointerCapture(e.pointerId); main.focus(); });
+main.addEventListener("pointermove", e => {
+  const r = main.getBoundingClientRect(), w = r.width - LEFT - 10;
+  if (drag) { move(drag.start - (e.clientX - drag.x) / w * S.win); tip.style.display = "none"; return; }
+  const x = e.clientX - r.left, y = e.clientY - r.top, lane = Math.floor((y - TOP) / LANE);
+  if (x < LEFT || lane < 0 || lane >= channels.length) { tip.style.display = "none"; if (S.hoverLane !== undefined) { S.hoverLane = undefined; drawMain(); } return; }
+  const t = S.start + (x - LEFT) / w * S.win, i = Math.min(N - 1, Math.max(0, Math.round(t * FS)));
+  tip.innerHTML = `<b>${channels[lane].name}</b> · ${t.toFixed(2)} s · ${channels[lane].values[i].toFixed(0)}`;
+  tip.style.display = "block"; tip.style.left = Math.min(r.width - 190, x + 14) + "px"; tip.style.top = (y + 12) + "px";
+  if (S.hoverLane !== lane) { S.hoverLane = lane; drawMain(); }
+});
+const endDrag = () => { drag = null; main.classList.remove("drag"); };
+main.addEventListener("pointerup", endDrag); main.addEventListener("pointercancel", endDrag);
+main.addEventListener("pointerleave", () => { tip.style.display = "none"; if (S.hoverLane !== undefined) { S.hoverLane = undefined; drawMain(); } });
+main.addEventListener("wheel", e => { if (Math.abs(e.deltaX) > Math.abs(e.deltaY) || e.shiftKey) { e.preventDefault(); move(S.start + (e.deltaX || e.deltaY) / 400 * S.win); } }, { passive: false });
+let miniDrag = false;
+const miniTo = e => { const r = mini.getBoundingClientRect(), t = (e.clientX - r.left - LEFT) / (r.width - LEFT - 10) * DUR; move(t - S.win / 2); };
+mini.addEventListener("pointerdown", e => { miniDrag = true; mini.setPointerCapture(e.pointerId); miniTo(e); });
+mini.addEventListener("pointermove", e => { if (miniDrag) miniTo(e); });
+mini.addEventListener("pointerup", () => { miniDrag = false; });
+main.addEventListener("keydown", e => {
+  const k = e.key;
+  if (k === "ArrowRight" || k === "ArrowLeft") { move(S.start + (k === "ArrowRight" ? 1 : -1) * (e.shiftKey ? 1 : 0.5) * S.win); }
+  else if (k === "Home") move(0); else if (k === "End") move(DUR);
+  else if (k === "+" || k === "=") setWin(WINS[Math.max(0, WINS.indexOf(S.win) - 1)]);
+  else if (k === "-") setWin(WINS[Math.min(WINS.length - 1, WINS.indexOf(S.win) + 1)]);
+  else if (k === "ArrowUp") setGain(1); else if (k === "ArrowDown") setGain(-1);
+  else if (k.toLowerCase() === "a" && P.annotated.length) { S.ann = !S.ann; renderLayers(); draw(); }
+  else if (k.toLowerCase() === "d" && P.detected.length) { S.det = !S.det; renderLayers(); draw(); }
+  else return;
+  e.preventDefault();
+});
+renderWin(); renderLayers();
+new ResizeObserver(() => { ENVELOPE = null; draw(); }).observe(document.body);
+document.fonts.ready.then(draw);
+draw();
+</script>
+</body>
+</html>

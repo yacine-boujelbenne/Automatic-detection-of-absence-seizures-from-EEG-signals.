@@ -33,7 +33,7 @@ def main():
     model_path = destination / "detector.joblib"
     joblib.dump(pipeline, model_path, compress=3)
 
-    frame = pd.read_csv(source / "features.csv", usecols=["record_id"])
+    frame = pd.read_csv(source / "features.csv", usecols=["record_id", "start_s", "end_s", "Class"])
     events = pd.read_csv(source / "annotations_seconds.csv")
     events[["record_id", "start_s", "end_s"]].to_csv(
         destination / "reference_events.csv", index=False
@@ -109,9 +109,21 @@ def main():
     (destination / "metadata.json").write_text(
         json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
+    export_test_scores(destination, frame, experiment)
     recordings = build_recordings(destination, metadata, events)
     print(f"Modèle exporté : {name}, post-traitement {selected['postprocessing']}")
     print(f"{len(recordings)} enregistrements disponibles par identifiant.")
+
+
+def export_test_scores(destination, frame, experiment):
+    """Scores continus des 38 configurations sur le test réservé, pour les courbes ROC et PR."""
+    test = frame.iloc[experiment["test_indices"]].reset_index(drop=True)
+    scores = pd.DataFrame(experiment["test_scores"])
+    if len(scores) != len(test):
+        raise ValueError("Les scores de test ne correspondent pas aux fenêtres de test.")
+    pd.concat([test, scores], axis=1).to_csv(
+        destination / "test_scores.csv", index=False, float_format="%.6g"
+    )
 
 
 def build_recordings(destination, metadata, events):

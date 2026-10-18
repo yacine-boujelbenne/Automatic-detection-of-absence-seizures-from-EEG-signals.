@@ -1,0 +1,12 @@
+.venv
+venv
+data
+artifacts
+app/model
+notebooks
+reports
+.git
+**/__pycache__
+*.zip
+.claude
+.opencode
