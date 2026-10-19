@@ -1870,16 +1870,16 @@ def main():
         st.stop()
 
     context()
-    st.logo(str(STATIC / "logo.svg"), size="large", icon_image=str(STATIC / "logo.svg"))
+    st.logo(str(STATIC / "logo.svg"), size="medium", icon_image=str(STATIC / "logo.svg"))
     PAGES.update(
-        home=st.Page(page_home, title="Accueil", icon=":material/home:", default=True),
-        understand=st.Page(page_understand, title="Comprendre", icon=":material/neurology:", url_path="comprendre"),
-        method=st.Page(page_method, title="Méthode", icon=":material/account_tree:", url_path="methode"),
-        visualisation=st.Page(page_visualisation, title="Visualisation", icon=":material/monitor_heart:", url_path="visualisation"),
-        detection=st.Page(page_detection, title="Détection", icon=":material/radar:", url_path="detection"),
-        errors=st.Page(page_errors, title="Erreurs", icon=":material/report:", url_path="erreurs"),
-        modeles=st.Page(page_models, title="Modèles", icon=":material/leaderboard:", url_path="modeles"),
-        limits=st.Page(page_limits, title="Limites", icon=":material/balance:", url_path="limites"),
+        home=st.Page(page_home, title="Accueil", default=True),
+        understand=st.Page(page_understand, title="Comprendre", url_path="comprendre"),
+        method=st.Page(page_method, title="Méthode", url_path="methode"),
+        visualisation=st.Page(page_visualisation, title="Visualisation", url_path="visualisation"),
+        detection=st.Page(page_detection, title="Détection", url_path="detection"),
+        errors=st.Page(page_errors, title="Erreurs", url_path="erreurs"),
+        modeles=st.Page(page_models, title="Modèles", url_path="modeles"),
+        limits=st.Page(page_limits, title="Limites", url_path="limites"),
     )  # fmt: skip
     navigation = st.navigation([PAGES[k] for k in READING_ORDER], position="top")
     section_style(
